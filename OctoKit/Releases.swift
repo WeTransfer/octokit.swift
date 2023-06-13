@@ -47,6 +47,11 @@ public struct Release: Codable {
     }
 }
 
+public struct ReleaseNotes: Codable {
+    public let name: String
+    public let body: String
+}
+
 // MARK: request
 
 public extension Octokit {
@@ -161,6 +166,44 @@ public extension Octokit {
         let router = ReleaseRouter.deleteRelease(configuration, owner, repository, releaseId)
         return router.load(session, completion: completion)
     }
+
+    /// Generates release notes.
+    /// - Parameters:
+    ///   - session: RequestKitURLSession, defaults to URLSession.shared()
+    ///   - owner: The user or organization that owns the repositories.
+    ///   - repo: The repository on which the release needs to be deleted.
+    ///   - releaseId: The ID of the release to delete.
+    ///   - completion: Callback for the outcome of the deletion.
+    @discardableResult
+    /// Generates release notes.
+    /// - Parameters:
+    ///   - session: RequestKitURLSession, defaults to URLSession.shared()
+    ///   - owner: The user or organization that owns the repositories.
+    ///   - repo: The repository on which the release needs to be deleted.
+    ///   - tagName: The tag name for the release. This can be an existing tag or a new one.
+    ///   - targetCommitish: Specifies the commitish value that will be the target for the release's tag. Required if the supplied tag_name does not reference an existing tag. Ignored if the tagName already exists.
+    ///   - previousTagName: The name of the previous tag to use as the starting point for the release notes. Use to manually specify the range for the set of changes considered as part this release.
+    ///   - completion: Callback for the outcome of the generation.
+    func generateReleaseNotes(_ session: RequestKitURLSession = URLSession.shared,
+                              owner: String,
+                              repository: String,
+                              tagName: String,
+                              targetCommitish: String,
+                              previousTagName: String,
+                              completion: @escaping (_ response: Result<ReleaseNotes, Error>) -> Void) -> URLSessionDataTaskProtocol?
+    {
+        let router = ReleaseRouter.generateNotes(configuration, owner, repository, tagName, targetCommitish, previousTagName)
+
+        return router.post(session, expectedResultType: ReleaseNotes.self) { releaseNotes, error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                if let releaseNotes = releaseNotes {
+                    completion(.success(releaseNotes))
+                }
+            }
+        }
+    }
 }
 
 // MARK: Router
@@ -170,6 +213,7 @@ enum ReleaseRouter: JSONPostRouter {
     case getReleaseByTag(Configuration, String, String, String)
     case postRelease(Configuration, String, String, String, String?, String?, String?, Bool, Bool, Bool)
     case deleteRelease(Configuration, String, String, Int)
+    case generateNotes(Configuration, String, String, String, String, String)
 
     var configuration: Configuration {
         switch self {
@@ -177,6 +221,7 @@ enum ReleaseRouter: JSONPostRouter {
         case let .getReleaseByTag(config, _, _, _): return config
         case let .postRelease(config, _, _, _, _, _, _, _, _, _): return config
         case let .deleteRelease(config, _, _, _): return config
+        case let .generateNotes(config, _, _, _, _, _): return config
         }
     }
 
@@ -184,7 +229,7 @@ enum ReleaseRouter: JSONPostRouter {
         switch self {
         case .listReleases, .getReleaseByTag:
             return .GET
-        case .postRelease:
+        case .postRelease, .generateNotes:
             return .POST
         case .deleteRelease:
             return .DELETE
@@ -195,7 +240,7 @@ enum ReleaseRouter: JSONPostRouter {
         switch self {
         case .listReleases, .getReleaseByTag:
             return .url
-        case .postRelease:
+        case .postRelease, .generateNotes:
             return .json
         case .deleteRelease:
             return .url
@@ -227,6 +272,13 @@ enum ReleaseRouter: JSONPostRouter {
             return params
         case .deleteRelease:
             return [:]
+        case let .generateNotes(_, _, _, tagName, targetCommitish, previousTagName):
+            let params: [String: Any] = [
+                "tag_name": tagName,
+                "target_commitish": targetCommitish,
+                "previous_tag_name": previousTagName
+            ]
+            return params
         }
     }
 
@@ -240,6 +292,8 @@ enum ReleaseRouter: JSONPostRouter {
             return "repos/\(owner)/\(repo)/releases"
         case let .deleteRelease(_, owner, repo, releaseId):
             return "repos/\(owner)/\(repo)/releases/\(releaseId)"
+        case let .generateNotes(_, owner, repo, _, _, _):
+            return "repos/\(owner)/\(repo)/releases/generate-notes"
         }
     }
 }
